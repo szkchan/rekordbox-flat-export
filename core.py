@@ -68,6 +68,7 @@ class TrackInfo:
     artist: str
     file_path: str  # export.pdb に記録された、USBルートからの相対パス
     bpm: Optional[float] = None
+    genre: str = ""
 
 
 @dataclass
@@ -139,13 +140,23 @@ def find_export_library(usb_root: Path) -> Path:
 
 
 def search_tracks_by_bpm(
-    tracks: dict[int, TrackInfo], target_bpm: float, tolerance: float
+    tracks: dict[int, TrackInfo],
+    target_bpm: float,
+    tolerance: float,
+    genre: Optional[str] = None,
 ) -> list[TrackInfo]:
-    """指定 BPM ± 許容範囲に一致するトラックを、目標 BPM に近い順で返す。"""
+    """指定 BPM ± 許容範囲（と、指定があればジャンル）に一致するトラックを、目標 BPM に近い順で返す。"""
     lo, hi = target_bpm - tolerance, target_bpm + tolerance
     matches = [t for t in tracks.values() if t.bpm is not None and lo <= t.bpm <= hi]
+    if genre:
+        matches = [t for t in matches if t.genre == genre]
     matches.sort(key=lambda t: (abs(t.bpm - target_bpm), t.title.lower()))
     return matches
+
+
+def list_genres(tracks: dict[int, TrackInfo]) -> list[str]:
+    """ライブラリ内で実際に使われているジャンル名の一覧（空欄を除く、五十音/アルファベット順）。"""
+    return sorted({t.genre for t in tracks.values() if t.genre})
 
 
 def make_search_playlist(name: str, track_ids: list[int]) -> PlaylistInfo:
@@ -184,6 +195,7 @@ def load_playlists_pdb(usb_root: Path) -> tuple[dict[int, TrackInfo], list[Playl
     db = Database.from_file(str(pdb_path))
 
     artist_map = {a.id: (a.name or "") for a in db.artists}
+    genre_map = {g.id: (g.name or "") for g in db.genres}
 
     tracks: dict[int, TrackInfo] = {}
     for t in db.tracks:
@@ -194,6 +206,7 @@ def load_playlists_pdb(usb_root: Path) -> tuple[dict[int, TrackInfo], list[Playl
             artist=artist_map.get(getattr(t, "artist_id", None), ""),
             file_path=t.file_path,
             bpm=(tempo / 100) if tempo else None,
+            genre=genre_map.get(getattr(t, "genre_id", None), ""),
         )
 
     # is_folder == False のノードのみが実際にトラックを持つ「プレイリスト」
@@ -230,6 +243,7 @@ def load_playlists_onelib(usb_root: Path) -> tuple[dict[int, TrackInfo], list[Pl
         tracks: dict[int, TrackInfo] = {}
         for c in db.get_content():
             artist_name = c.artist.name if c.artist is not None else ""
+            genre_name = c.genre.name if c.genre is not None else ""
             bpmx100 = getattr(c, "bpmx100", None)
             tracks[c.content_id] = TrackInfo(
                 id=c.content_id,
@@ -237,6 +251,7 @@ def load_playlists_onelib(usb_root: Path) -> tuple[dict[int, TrackInfo], list[Pl
                 artist=artist_name or "",
                 file_path=c.path,
                 bpm=(bpmx100 / 100) if bpmx100 else None,
+                genre=genre_name or "",
             )
 
         # attribute == 0 が通常のプレイリスト、1 がフォルダ

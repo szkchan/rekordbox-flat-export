@@ -38,6 +38,9 @@ class App(tk.Tk):
 
         self.bpm_results: list[core.TrackInfo] = []
         self.bpm_selected: dict[int, bool] = {}
+        self._genre_list: list[str] = []
+        self._bpm_sort_col: str | None = None
+        self._bpm_sort_asc: bool = True
 
         self.event_queue: "queue.Queue" = queue.Queue()
         self.worker: threading.Thread | None = None
@@ -62,9 +65,8 @@ class App(tk.Tk):
         self.tree.heading("name", text=t(self.lang, "col_name"))
         self.tree.heading("count", text=t(self.lang, "col_count"))
         self.bpm_tree.heading("sel", text=t(self.lang, "col_sel"))
-        self.bpm_tree.heading("title", text=t(self.lang, "col_title"))
-        self.bpm_tree.heading("artist", text=t(self.lang, "col_artist"))
-        self.bpm_tree.heading("bpm", text=t(self.lang, "col_bpm"))
+        self._refresh_bpm_headings()
+        self._refresh_genre_combo()
         self.notebook.tab(self.playlist_tab, text=t(self.lang, "tab_playlist_mode"))
         self.notebook.tab(self.bpm_tab, text=t(self.lang, "tab_bpm_mode"))
 
@@ -79,6 +81,53 @@ class App(tk.Tk):
 
     def t(self, key: str, **params) -> str:
         return t(self.lang, key, **params)
+
+    # ---------- BPM tree: sortable columns ----------
+
+    def _refresh_bpm_headings(self):
+        labels = {"title": "col_title", "artist": "col_artist", "bpm": "col_bpm"}
+        for col, key in labels.items():
+            text = self.t(key)
+            if self._bpm_sort_col == col:
+                text += " ▲" if self._bpm_sort_asc else " ▼"
+            self.bpm_tree.heading(col, text=text)
+
+    def _sort_bpm_tree(self, col: str):
+        if self._bpm_sort_col == col:
+            self._bpm_sort_asc = not self._bpm_sort_asc
+        else:
+            self._bpm_sort_col = col
+            self._bpm_sort_asc = True
+        self._apply_bpm_sort()
+
+    def _apply_bpm_sort(self):
+        col = self._bpm_sort_col
+        if col is None:
+            return
+
+        def key_func(pair):
+            value = pair[0]
+            if col == "bpm":
+                try:
+                    return float(value)
+                except ValueError:
+                    return float("-inf")
+            return value.lower()
+
+        items = [(self.bpm_tree.set(iid, col), iid) for iid in self.bpm_tree.get_children("")]
+        items.sort(key=key_func, reverse=not self._bpm_sort_asc)
+        for index, (_, iid) in enumerate(items):
+            self.bpm_tree.move(iid, "", index)
+        self._refresh_bpm_headings()
+
+    # ---------- genre filter ----------
+
+    def _refresh_genre_combo(self):
+        all_label = self.t("genre_all")
+        current = self.genre_var.get()
+        self.genre_combo["values"] = [all_label] + self._genre_list
+        if current not in self._genre_list:
+            self.genre_var.set(all_label)
 
     # ---------- UI construction ----------
 
@@ -247,8 +296,15 @@ class App(tk.Tk):
             row=0, column=3, sticky="w", padx=4
         )
 
+        self._reg(ttk.Label(search_bar), "label_genre").grid(row=0, column=4, sticky="w", padx=(16, 0))
+        self.genre_var = tk.StringVar(value="")
+        self.genre_combo = ttk.Combobox(
+            search_bar, textvariable=self.genre_var, state="readonly", width=18
+        )
+        self.genre_combo.grid(row=0, column=5, sticky="w", padx=4)
+
         self._reg(ttk.Button(search_bar, command=self._bpm_search), "btn_bpm_search").grid(
-            row=0, column=4, sticky="w", padx=(16, 0)
+            row=0, column=6, sticky="w", padx=(16, 0)
         )
 
         folder_bar = ttk.Frame(parent)
@@ -278,6 +334,8 @@ class App(tk.Tk):
         self.bpm_tree.column("title", width=280, anchor="w")
         self.bpm_tree.column("artist", width=180, anchor="w")
         self.bpm_tree.column("bpm", width=80, anchor="center")
+        for col in ("title", "artist", "bpm"):
+            self.bpm_tree.heading(col, command=lambda c=col: self._sort_bpm_tree(c))
         self.bpm_tree.pack(side="left", fill="both", expand=True)
         self.bpm_tree.bind("<Button-1>", self._on_bpm_tree_click)
 
@@ -371,6 +429,9 @@ class App(tk.Tk):
         if not playlists:
             self._log(self.t("log_no_playlists"))
 
+        self._genre_list = core.list_genres(tracks)
+        self._refresh_genre_combo()
+
     def _on_tree_click(self, event):
         region = self.tree.identify("region", event.x, event.y)
         if region != "cell":
@@ -408,9 +469,12 @@ class App(tk.Tk):
             messagebox.showwarning(self.t("title_warn"), self.t("msg_bpm_invalid"))
             return
 
-        results = core.search_tracks_by_bpm(self.tracks, target, tolerance)
+        genre_sel = self.genre_var.get()
+        genre = genre_sel if genre_sel and genre_sel != self.t("genre_all") else None
+
+        results = core.search_tracks_by_bpm(self.tracks, target, tolerance, genre=genre)
         self.bpm_results = results
-        self.bpm_selected = {t.id: True for t in results}
+        self.bpm_selected = {track.id: True for track in results}
 
         self.bpm_tree.delete(*self.bpm_tree.get_children())
         for track in results:
@@ -418,10 +482,12 @@ class App(tk.Tk):
             self.bpm_tree.insert(
                 "", "end", iid=str(track.id), values=("✓", track.title, track.artist, bpm_str)
             )
+        self._apply_bpm_sort()
 
         if not self.bpm_folder_var.get().strip():
             target_str = f"{target:g}"
-            self.bpm_folder_var.set(f"bpm_{target_str}")
+            suffix = f"_{genre}" if genre else ""
+            self.bpm_folder_var.set(f"bpm_{target_str}{suffix}")
 
         self._log(self.t("log_bpm_found", n=len(results), target=target, tol=tolerance))
 
