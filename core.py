@@ -67,6 +67,7 @@ class TrackInfo:
     title: str
     artist: str
     file_path: str  # export.pdb に記録された、USBルートからの相対パス
+    bpm: Optional[float] = None
 
 
 @dataclass
@@ -137,6 +138,21 @@ def find_export_library(usb_root: Path) -> Path:
     raise OneLibraryNotFoundError(usb_root)
 
 
+def search_tracks_by_bpm(
+    tracks: dict[int, TrackInfo], target_bpm: float, tolerance: float
+) -> list[TrackInfo]:
+    """指定 BPM ± 許容範囲に一致するトラックを、目標 BPM に近い順で返す。"""
+    lo, hi = target_bpm - tolerance, target_bpm + tolerance
+    matches = [t for t in tracks.values() if t.bpm is not None and lo <= t.bpm <= hi]
+    matches.sort(key=lambda t: (abs(t.bpm - target_bpm), t.title.lower()))
+    return matches
+
+
+def make_search_playlist(name: str, track_ids: list[int]) -> PlaylistInfo:
+    """BPM 検索結果などを、既存の build_copy_plan にそのまま渡せる PlaylistInfo にまとめる。"""
+    return PlaylistInfo(id=-1, name=sanitize_name(name), original_name=name, track_ids=track_ids)
+
+
 def _finalize_playlists(
     raw_playlists: list[tuple[int, str, list[int]]]
 ) -> list[PlaylistInfo]:
@@ -171,11 +187,13 @@ def load_playlists_pdb(usb_root: Path) -> tuple[dict[int, TrackInfo], list[Playl
 
     tracks: dict[int, TrackInfo] = {}
     for t in db.tracks:
+        tempo = getattr(t, "tempo", None)  # BPM * 100
         tracks[t.id] = TrackInfo(
             id=t.id,
             title=getattr(t, "title", "") or "",
             artist=artist_map.get(getattr(t, "artist_id", None), ""),
             file_path=t.file_path,
+            bpm=(tempo / 100) if tempo else None,
         )
 
     # is_folder == False のノードのみが実際にトラックを持つ「プレイリスト」
@@ -212,11 +230,13 @@ def load_playlists_onelib(usb_root: Path) -> tuple[dict[int, TrackInfo], list[Pl
         tracks: dict[int, TrackInfo] = {}
         for c in db.get_content():
             artist_name = c.artist.name if c.artist is not None else ""
+            bpmx100 = getattr(c, "bpmx100", None)
             tracks[c.content_id] = TrackInfo(
                 id=c.content_id,
                 title=c.title or "",
                 artist=artist_name or "",
                 file_path=c.path,
+                bpm=(bpmx100 / 100) if bpmx100 else None,
             )
 
         # attribute == 0 が通常のプレイリスト、1 がフォルダ

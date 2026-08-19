@@ -1,10 +1,11 @@
 """
-rekordbox が Pioneer CDJ 用に書き出した USB のプレイリストを、
+rekordbox が Pioneer CDJ 用に書き出した USB のライブラリを、
 フォルダ読み込みしか対応していない機種 (CDJ-400 や他社 CDJ 等) 向けに、
 
-  <出力先>/Playlists/<プレイリスト名>/<連番>_<元のファイル名>
+  <出力先>/Playlists/<プレイリスト名 or BPM検索名>/<連番>_<元のファイル名>
 
-という構成でコピーする GUI アプリ。
+という構成でコピーする GUI アプリ。プレイリストモードと、BPM近傍で
+ライブラリ全体を横断検索するBPM検索モードの2つのタブがある。
 
 使い方:
     python app.py
@@ -28,12 +29,15 @@ class App(tk.Tk):
         self.lang = "en"
         self._i18n_widgets: list[tuple[tk.Widget, str, dict]] = []
 
-        self.geometry("820x640")
-        self.minsize(700, 520)
+        self.geometry("860x700")
+        self.minsize(720, 560)
 
         self.tracks: dict[int, core.TrackInfo] = {}
         self.playlists: list[core.PlaylistInfo] = []
         self.selected: dict[int, bool] = {}
+
+        self.bpm_results: list[core.TrackInfo] = []
+        self.bpm_selected: dict[int, bool] = {}
 
         self.event_queue: "queue.Queue" = queue.Queue()
         self.worker: threading.Thread | None = None
@@ -57,6 +61,12 @@ class App(tk.Tk):
         self.tree.heading("sel", text=t(self.lang, "col_sel"))
         self.tree.heading("name", text=t(self.lang, "col_name"))
         self.tree.heading("count", text=t(self.lang, "col_count"))
+        self.bpm_tree.heading("sel", text=t(self.lang, "col_sel"))
+        self.bpm_tree.heading("title", text=t(self.lang, "col_title"))
+        self.bpm_tree.heading("artist", text=t(self.lang, "col_artist"))
+        self.bpm_tree.heading("bpm", text=t(self.lang, "col_bpm"))
+        self.notebook.tab(self.playlist_tab, text=t(self.lang, "tab_playlist_mode"))
+        self.notebook.tab(self.bpm_tab, text=t(self.lang, "tab_bpm_mode"))
 
     def _on_language_change(self):
         self.lang = self.lang_var.get()
@@ -119,29 +129,18 @@ class App(tk.Tk):
         btns = ttk.Frame(self)
         btns.pack(fill="x", **pad)
         self._reg(ttk.Button(btns, command=self._load), "btn_load").pack(side="left")
-        self._reg(
-            ttk.Button(btns, command=lambda: self._set_all(True)), "btn_select_all"
-        ).pack(side="left", padx=4)
-        self._reg(ttk.Button(btns, command=lambda: self._set_all(False)), "btn_deselect_all").pack(
-            side="left"
-        )
 
-        # Treeview: チェック / プレイリスト名 / 曲数
-        tree_frame = ttk.Frame(self)
-        tree_frame.pack(fill="both", expand=True, **pad)
+        # ---- Notebook: プレイリストモード / BPM検索モード ----
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, **pad)
 
-        self.tree = ttk.Treeview(
-            tree_frame, columns=("sel", "name", "count"), show="headings", selectmode="none"
-        )
-        self.tree.column("sel", width=60, anchor="center")
-        self.tree.column("name", width=400, anchor="w")
-        self.tree.column("count", width=80, anchor="center")
-        self.tree.pack(side="left", fill="both", expand=True)
-        self.tree.bind("<Button-1>", self._on_tree_click)
+        self.playlist_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.playlist_tab, text="Playlist mode")
+        self._build_playlist_tab(self.playlist_tab)
 
-        scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
+        self.bpm_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.bpm_tab, text="BPM search mode")
+        self._build_bpm_tab(self.bpm_tab)
 
         naming = ttk.LabelFrame(self)
         self._reg(naming, "group_naming")
@@ -181,7 +180,7 @@ class App(tk.Tk):
             ttk.Radiobutton(naming, variable=self.seq_position_var, value="suffix"), "seq_suffix"
         ).grid(row=3, column=2, sticky="w")
 
-        ttk.Style(self).configure("Wrap.TCheckbutton", wraplength=760, justify="left")
+        ttk.Style(self).configure("Wrap.TCheckbutton", wraplength=800, justify="left")
         self.romanize_var = tk.BooleanVar(value=False)
         romanize_chk = ttk.Checkbutton(naming, variable=self.romanize_var, style="Wrap.TCheckbutton")
         self._reg(romanize_chk, "chk_romanize").grid(
@@ -200,11 +199,91 @@ class App(tk.Tk):
 
         log_frame = ttk.Frame(self)
         log_frame.pack(fill="both", expand=True, **pad)
-        self.log = tk.Text(log_frame, height=10, state="disabled")
+        self.log = tk.Text(log_frame, height=8, state="disabled")
         self.log.pack(side="left", fill="both", expand=True)
         log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
         self.log.configure(yscrollcommand=log_scroll.set)
         log_scroll.pack(side="right", fill="y")
+
+    def _build_playlist_tab(self, parent):
+        btns = ttk.Frame(parent)
+        btns.pack(fill="x", padx=4, pady=4)
+        self._reg(
+            ttk.Button(btns, command=lambda: self._set_all(True)), "btn_select_all"
+        ).pack(side="left")
+        self._reg(ttk.Button(btns, command=lambda: self._set_all(False)), "btn_deselect_all").pack(
+            side="left", padx=4
+        )
+
+        tree_frame = ttk.Frame(parent)
+        tree_frame.pack(fill="both", expand=True, padx=4, pady=4)
+
+        self.tree = ttk.Treeview(
+            tree_frame, columns=("sel", "name", "count"), show="headings", selectmode="none"
+        )
+        self.tree.column("sel", width=60, anchor="center")
+        self.tree.column("name", width=400, anchor="w")
+        self.tree.column("count", width=80, anchor="center")
+        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.bind("<Button-1>", self._on_tree_click)
+
+        scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+
+    def _build_bpm_tab(self, parent):
+        search_bar = ttk.Frame(parent)
+        search_bar.pack(fill="x", padx=4, pady=4)
+
+        self._reg(ttk.Label(search_bar), "label_bpm_target").grid(row=0, column=0, sticky="w")
+        self.bpm_target_var = tk.StringVar(value="128")
+        ttk.Entry(search_bar, textvariable=self.bpm_target_var, width=10).grid(
+            row=0, column=1, sticky="w", padx=(4, 16)
+        )
+
+        self._reg(ttk.Label(search_bar), "label_bpm_tolerance").grid(row=0, column=2, sticky="w")
+        self.bpm_tolerance_var = tk.StringVar(value="1")
+        ttk.Entry(search_bar, textvariable=self.bpm_tolerance_var, width=10).grid(
+            row=0, column=3, sticky="w", padx=4
+        )
+
+        self._reg(ttk.Button(search_bar, command=self._bpm_search), "btn_bpm_search").grid(
+            row=0, column=4, sticky="w", padx=(16, 0)
+        )
+
+        folder_bar = ttk.Frame(parent)
+        folder_bar.pack(fill="x", padx=4, pady=(0, 4))
+        self._reg(ttk.Label(folder_bar), "label_bpm_folder").pack(side="left")
+        self.bpm_folder_var = tk.StringVar()
+        ttk.Entry(folder_bar, textvariable=self.bpm_folder_var).pack(
+            side="left", fill="x", expand=True, padx=4
+        )
+
+        btns = ttk.Frame(parent)
+        btns.pack(fill="x", padx=4, pady=4)
+        self._reg(
+            ttk.Button(btns, command=lambda: self._set_all_bpm(True)), "btn_select_all"
+        ).pack(side="left")
+        self._reg(ttk.Button(btns, command=lambda: self._set_all_bpm(False)), "btn_deselect_all").pack(
+            side="left", padx=4
+        )
+
+        tree_frame = ttk.Frame(parent)
+        tree_frame.pack(fill="both", expand=True, padx=4, pady=4)
+
+        self.bpm_tree = ttk.Treeview(
+            tree_frame, columns=("sel", "title", "artist", "bpm"), show="headings", selectmode="none"
+        )
+        self.bpm_tree.column("sel", width=60, anchor="center")
+        self.bpm_tree.column("title", width=280, anchor="w")
+        self.bpm_tree.column("artist", width=180, anchor="w")
+        self.bpm_tree.column("bpm", width=80, anchor="center")
+        self.bpm_tree.pack(side="left", fill="both", expand=True)
+        self.bpm_tree.bind("<Button-1>", self._on_bpm_tree_click)
+
+        scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.bpm_tree.yview)
+        self.bpm_tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
 
     # ---------- helpers ----------
 
@@ -240,7 +319,10 @@ class App(tk.Tk):
             return self.t(code, **getattr(e, "params", {}))
         return str(e)
 
-    # ---------- loading playlists ----------
+    def _is_bpm_tab_active(self) -> bool:
+        return self.notebook.select() == str(self.bpm_tab)
+
+    # ---------- loading library ----------
 
     def _load(self):
         usb_root = self.usb_var.get().strip()
@@ -257,6 +339,9 @@ class App(tk.Tk):
         self._clear_log()
         self._log(self.t("log_loading", source=source_label, path=str(usb_path)))
         self.tree.delete(*self.tree.get_children())
+        self.bpm_tree.delete(*self.bpm_tree.get_children())
+        self.bpm_results = []
+        self.bpm_selected = {}
 
         def work():
             try:
@@ -310,10 +395,64 @@ class App(tk.Tk):
                 vals[0] = mark
                 self.tree.item(str(pl.id), values=vals)
 
+    # ---------- BPM search mode ----------
+
+    def _bpm_search(self):
+        if not self.tracks:
+            messagebox.showwarning(self.t("title_not_loaded"), self.t("msg_not_loaded"))
+            return
+        try:
+            target = float(self.bpm_target_var.get())
+            tolerance = float(self.bpm_tolerance_var.get())
+        except ValueError:
+            messagebox.showwarning(self.t("title_warn"), self.t("msg_bpm_invalid"))
+            return
+
+        results = core.search_tracks_by_bpm(self.tracks, target, tolerance)
+        self.bpm_results = results
+        self.bpm_selected = {t.id: True for t in results}
+
+        self.bpm_tree.delete(*self.bpm_tree.get_children())
+        for track in results:
+            bpm_str = f"{track.bpm:.2f}" if track.bpm is not None else "-"
+            self.bpm_tree.insert(
+                "", "end", iid=str(track.id), values=("✓", track.title, track.artist, bpm_str)
+            )
+
+        if not self.bpm_folder_var.get().strip():
+            target_str = f"{target:g}"
+            self.bpm_folder_var.set(f"bpm_{target_str}")
+
+        self._log(self.t("log_bpm_found", n=len(results), target=target, tol=tolerance))
+
+    def _on_bpm_tree_click(self, event):
+        region = self.bpm_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        col = self.bpm_tree.identify_column(event.x)
+        row = self.bpm_tree.identify_row(event.y)
+        if not row or col != "#1":
+            return
+        tid = int(row)
+        self.bpm_selected[tid] = not self.bpm_selected.get(tid, True)
+        mark = "✓" if self.bpm_selected[tid] else " "
+        vals = list(self.bpm_tree.item(row, "values"))
+        vals[0] = mark
+        self.bpm_tree.item(row, values=vals)
+
+    def _set_all_bpm(self, value: bool):
+        for track in self.bpm_results:
+            self.bpm_selected[track.id] = value
+            mark = "✓" if value else " "
+            vals = list(self.bpm_tree.item(str(track.id), "values"))
+            if vals:
+                vals[0] = mark
+                self.bpm_tree.item(str(track.id), values=vals)
+
     # ---------- copying ----------
 
     def _start_copy(self):
-        if not self.playlists:
+        if not self.tracks:
             messagebox.showwarning(self.t("title_not_loaded"), self.t("msg_not_loaded"))
             return
         out_root = self.out_var.get().strip()
@@ -321,10 +460,21 @@ class App(tk.Tk):
             messagebox.showwarning(self.t("title_warn"), self.t("msg_out_missing"))
             return
 
-        chosen = [pl for pl in self.playlists if self.selected.get(pl.id, True)]
-        if not chosen:
-            messagebox.showwarning(self.t("title_no_selection"), self.t("msg_no_selection"))
-            return
+        if self._is_bpm_tab_active():
+            chosen_ids = [t.id for t in self.bpm_results if self.bpm_selected.get(t.id, True)]
+            if not chosen_ids:
+                messagebox.showwarning(self.t("title_no_selection"), self.t("msg_no_selection"))
+                return
+            folder_name = self.bpm_folder_var.get().strip()
+            if not folder_name:
+                messagebox.showwarning(self.t("title_warn"), self.t("msg_bpm_folder_missing"))
+                return
+            chosen_playlists = [core.make_search_playlist(folder_name, chosen_ids)]
+        else:
+            chosen_playlists = [pl for pl in self.playlists if self.selected.get(pl.id, True)]
+            if not chosen_playlists:
+                messagebox.showwarning(self.t("title_no_selection"), self.t("msg_no_selection"))
+                return
 
         usb_path = Path(self.usb_var.get().strip())
         out_path = Path(out_root)
@@ -335,7 +485,7 @@ class App(tk.Tk):
                 usb_path,
                 out_path,
                 self.tracks,
-                chosen,
+                chosen_playlists,
                 mp3_only=self.mp3_only_var.get(),
                 name_source=self.name_source_var.get(),
                 seq_position=self.seq_position_var.get(),
@@ -349,7 +499,7 @@ class App(tk.Tk):
         ok_count = sum(1 for p in plan if p.ok)
         missing = total - ok_count
 
-        msg = self.t("confirm_summary", n=len(chosen), total=total)
+        msg = self.t("confirm_summary", n=len(chosen_playlists), total=total)
         if missing:
             msg += self.t("confirm_missing", m=missing)
         msg += "\n\n" + (self.t("confirm_dry_run_note") if dry_run else self.t("confirm_dest", path=out_path))
