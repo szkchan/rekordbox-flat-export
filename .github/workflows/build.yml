@@ -1,0 +1,68 @@
+name: Build executables
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset_name: RekordboxFlatExport-windows.exe
+          - os: macos-latest
+            asset_name: RekordboxFlatExport-macos.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-onelib.txt
+          pip install pyinstaller
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name RekordboxFlatExport --collect-all pykakasi --collect-all rekordbox_pdb --collect-all pyrekordbox --collect-all sqlcipher3 app.py
+          Copy-Item dist/RekordboxFlatExport.exe RekordboxFlatExport-windows.exe
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name RekordboxFlatExport --collect-all pykakasi --collect-all rekordbox_pdb --collect-all pyrekordbox --collect-all sqlcipher3 app.py
+          ditto -c -k --sequesterRsrc --keepParent dist/RekordboxFlatExport.app RekordboxFlatExport-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" artifacts/*/* --title "${{ github.ref_name }}" --generate-notes --latest
