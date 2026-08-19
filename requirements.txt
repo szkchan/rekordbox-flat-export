@@ -1,0 +1,7 @@
+# export.pdb (rekordbox が CDJ 用 USB に書き出す DeviceSQL 形式の DB) を読むためのライブラリ。
+# pyrekordbox はデスクトップの master.db 専用で export.pdb には対応していないため、
+# こちらを利用しています。PyPI に無い場合があるため GitHub から直接インストールします。
+git+https://github.com/fragmede/rekordbox-pdb.git
+
+# マルチバイト文字（日本語など）のファイル名・フォルダ名をローマ字化するオプションで使用
+pykakasi

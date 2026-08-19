@@ -1,0 +1,9 @@
+# [ベータ] One Library / Device Library Plus (exportLibrary.db) を読むためのオプション依存関係。
+#
+# pyrekordbox の devicelib_plus モジュールを使用しますが、これは執筆時点(2026-08)で
+# PyPI 未リリースの開発版 (master ブランチ) にのみ存在します。安定版 `pip install pyrekordbox`
+# には含まれていないため、GitHub から直接インストールする必要があります。
+#
+# 未リリースコードのため将来 API が変わったり壊れたりする可能性があります。
+# 「変換元ライブラリ」で「One Library (ベータ)」を選ばない場合はインストール不要です。
+git+https://github.com/dylanljones/pyrekordbox.git
