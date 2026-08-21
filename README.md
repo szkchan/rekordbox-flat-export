@@ -1,13 +1,16 @@
-# rekordbox USB プレイリスト展開ツール
+# rekordbox USB Playlist Exporter
 
-GUI 画面左上の「言語」で日本語・English をいつでも切り替えられます（`i18n.py` に文言をまとめた辞書方式）。
+[日本語版はこちら (Japanese README)](README.ja.md)
 
-rekordbox で Pioneer CDJ 用に書き出した USB (`PIONEER/rekordbox/export.pdb` を含むもの) から
-プレイリストと曲ファイルを読み込み、フォルダ読み込みしか対応していない機種
-(CDJ-400 や他社製 CDJ 等) 向けに、以下のようなシンプルなフォルダ構成へ **コピー**（元の USB は変更しません）するツールです。
+Switch between English and 日本語 anytime from the "Language" control in the top-left of the GUI
+(a dictionary-based translation table lives in `i18n.py`).
+
+Reads a USB exported from rekordbox for Pioneer CDJs (containing `PIONEER/rekordbox/export.pdb`) and
+**copies** (never moves — your original USB is left untouched) tracks into a simple flat folder
+structure for players that only support folder browsing (CDJ-400, third-party CDJs, etc.):
 
 ```
-出力先/
+output/
   Playlists/
     Pops/
       01_track_a.mp3
@@ -16,95 +19,118 @@ rekordbox で Pioneer CDJ 用に書き出した USB (`PIONEER/rekordbox/export.p
       01_track_c.mp3
 ```
 
-- フォルダ名 = プレイリスト名（Windowsで使えない文字は `_` に置換）
-- ファイル名 = プレイリスト内の連番 + `_` + 元のファイル名（元のファイル名はそのまま保持）
-- rekordbox 上でプレイリストがフォルダに入れ子になっていても、出力側は
-  「プレイリストごとに1フォルダ」にフラット化されます（フォルダ階層は再現しません）。
-- 同名プレイリストが複数ある場合は `名前_1`, `名前_2` ... のように自動で区別します。
+- Folder name = playlist name (characters invalid on Windows are replaced with `_`)
+- File name = sequence number within the playlist + `_` + original file name (original file name is kept as-is)
+- Even if playlists are nested in folders in rekordbox, the output is flattened to
+  "one folder per playlist" (the folder hierarchy is not reproduced).
+- Duplicate playlist names are automatically disambiguated as `name_1`, `name_2`, ...
 
-### 追加オプション（GUI の「ファイル名・フォルダ名のオプション」欄）
+### Additional options (the "File / folder naming options" panel in the GUI)
 
-- **mp3のみコピーする**: 拡張子が `.mp3` 以外のファイルを除外します。連番はコピー対象になった曲数だけで振り直されます。
-- **ファイル名の元**:
-  - 「元のファイル名」: 元のファイル名をそのまま使用（デフォルト）
-  - 「タグ（アーティスト名・曲名）」: rekordbox DB 上のアーティスト名・曲名からファイル名を生成
-- **タグの順序**（ファイル名の元が「タグ」のときのみ有効）:
-  - 「アーティスト名 - 曲名」（デフォルト）
-  - 「曲名 - アーティスト名」
-- **連番の位置**: 連番をファイル名の先頭 (`01_名前.mp3`) にするか末尾 (`名前_01.mp3`) にするか切り替え可能
-- **ローマ字化 (pykakasi)**: 日本語などマルチバイト文字を含むファイル名・フォルダ名をヘボン式ローマ字に変換します。
-  プレイリストのフォルダ名にも同時に適用されます（機種によってはフォルダ名の多バイト文字表示も苦手なため）。
+- **mp3 only**: excludes any file whose extension isn't `.mp3`. Sequence numbers are renumbered
+  based only on the tracks actually copied.
+- **File name source**:
+  - "Original file name": use the original file name as-is (default)
+  - "Tag (artist / title)": build the file name from the artist/title in the rekordbox database
+- **Tag order** (only relevant when the file name source is "Tag"):
+  - "Artist - Title" (default)
+  - "Title - Artist"
+- **Sequence number position**: prefix (`01_name.mp3`) or suffix (`name_01.mp3`)
+- **Romanize (pykakasi)**: converts multi-byte characters (e.g. Japanese) in file/folder names to
+  Hepburn-style romaji. Also applied to playlist folder names (some players struggle to display
+  multi-byte characters in folder names too).
 
-## 2つのモード
+## Two modes
 
-GUI にはタブが2つあります。
+The GUI has two tabs:
 
-- **プレイリストモード**: 上記の通り、rekordbox のプレイリストをそのままフォルダにコピー
-- **BPM検索モード**: 目標BPMと許容範囲（±）を指定して、プレイリストに関係なくライブラリ全体から
-  BPMが近いトラックを横断検索し、選んだ曲だけを好きな名前のフォルダ（例: `Playlists/bpm_128/`）にコピー。
-  出力フォルダ名は自由に変更できます。BPMが近い順に一覧表示されます。
-  - ジャンルでの絞り込みも可能（ライブラリ読み込み時に実際に使われているジャンルを自動収集してドロップダウンに表示。「すべて」でジャンル無視）
-  - 結果一覧は「曲名」「アーティスト」「BPM」の各列見出しをクリックすると昇順・降順でソートできます
+- **Playlist mode**: copies rekordbox playlists into folders as described above.
+- **BPM search mode**: given a target BPM and a tolerance (±), searches the *entire library*
+  (independent of playlists) for tracks whose BPM falls in range, and copies the selected results
+  into a folder with a name you choose (e.g. `Playlists/bpm_128/`). Results are listed closest-BPM-first.
+  - Can also be filtered by genre (the dropdown is auto-populated from the genres actually used in
+    the loaded library; "All" ignores genre).
+  - Click the "Title", "Artist", or "BPM" column headers in the result list to sort ascending/descending.
 
-「ファイル名・フォルダ名のオプション」（mp3限定・タグ命名・ローマ字化など）はどちらのモードでも共通で使えます。
+The naming options (mp3-only, tag-based naming, romanization, etc.) apply to both modes.
 
-## 変換元ライブラリ（2種類から選択）
+## Source library (choose one of two formats)
 
-GUI の「変換元ライブラリ」で、USB 内のどちらの DB 形式を読むか選べます。
+The GUI's "Source library" selector lets you choose which database format on the USB to read.
 
-| | export.pdb（安定） | One Library / exportLibrary.db（**ベータ**） |
+| | export.pdb (stable) | One Library / exportLibrary.db (**beta**) |
 |---|---|---|
-| 対象 | 従来の rekordbox デバイスエクスポート形式 | 新しい Device Library Plus 形式（OPUS-QUAD 等の新型ハードウェア向け） |
-| 使用ライブラリ | [`rekordbox-pdb`](https://github.com/fragmede/rekordbox-pdb) | `pyrekordbox` の `devicelib_plus`（**未リリースの開発版のみ**） |
-| インストール | `requirements.txt` に含む | `requirements-onelib.txt` を別途インストール |
-| 検証状況 | 実機未検証（スキーマは公開ドキュメント通りに実装） | 実機は未検証。スキーマ通りの合成データでの読み込みロジックの動作は確認済み |
+| Applies to | The classic rekordbox device-export format | The newer Device Library Plus format (for newer hardware such as the OPUS-QUAD) |
+| Library used | [`rekordbox-pdb`](https://github.com/fragmede/rekordbox-pdb) | `pyrekordbox`'s `devicelib_plus` (**unreleased dev build only**) |
+| Install | Included in `requirements.txt` | Install `requirements-onelib.txt` separately |
+| Verified | **Confirmed playing on real CDJ-400 hardware** | Not tested on real hardware yet; the read logic has been verified against schema-accurate synthetic data |
 
-`pyrekordbox` はデスクトップの `master.db` 専用で、CDJ 向け `export.pdb` (DeviceSQL 形式) には対応していないため、
-安定側は `rekordbox-pdb` を使用しています。
+`pyrekordbox`'s stable release only supports the desktop `master.db`, not the `export.pdb`
+(DeviceSQL format) used on CDJ USB exports — that's why the stable path here uses `rekordbox-pdb` instead.
 
-**One Library (exportLibrary.db)** は、USB 内の `PIONEER/rekordbox/export.pdb` と同じフォルダに置かれる、より新しい
-DB 形式です（対応するハードウェアが書き出す場合のみ存在します）。`pyrekordbox` にはこれを読む `devicelib_plus`
-モジュールがありますが、**まだ PyPI には公開されておらず**、GitHub の開発版にしかありません。API が今後変わったり
-壊れたりする可能性があるため「ベータ」としています。
+**One Library (`exportLibrary.db`)** is a newer database format placed in the same folder as
+`PIONEER/rekordbox/export.pdb` on the USB (only present if your hardware/rekordbox setup exports it).
+`pyrekordbox` has a `devicelib_plus` module that reads it, but it's **not yet published to PyPI** —
+only available on the GitHub development branch. Since it depends on unreleased code that could change
+or break, it's marked "beta" here.
 
-どちらの形式でも、まずは **ドライラン機能**（実際にはコピーせず、何がコピーされるかログだけ表示する機能）で
-少数のプレイリストを確認してから、実際のコピーに進むことを強くおすすめします。
+The `export.pdb` path has been confirmed to produce a working, playable USB on a real CDJ-400. One
+Library (beta) hasn't been tested on real hardware yet, so it's recommended to use **dry run**
+(logs what would be copied without actually copying anything) on a few playlists first before trusting it.
 
-## セットアップ
+## Setup
 
 ```bash
 cd rekordbox_flat_export
 pip install -r requirements.txt
 
-# One Library (ベータ) を使う場合のみ、追加でこちらも:
+# Only if you want to use One Library (beta):
 pip install -r requirements-onelib.txt
 ```
 
-## 起動方法
+## Running
 
 ```bash
 python app.py
 ```
 
-## 使い方
+## Usage
 
-1. 「変換元ライブラリ」で `export.pdb (安定)` か `One Library (ベータ)` を選択
-2. 「コピー元 USB」に、rekordbox でエクスポート済みの USB のルートフォルダ（`PIONEER` フォルダがある階層）を指定
-3. 「出力先フォルダ」に、コピー先（CDJ-400 用の別 USB など）のフォルダを指定
-4. 「ライブラリ読み込み」を押すと、プレイリスト一覧と曲数が表示されます（BPM検索モードもこのタイミングでライブラリ全体が読み込まれます）
-5. 「プレイリストモード」タブでは不要なプレイリストのチェックを外して除外、「BPM検索モード」タブでは目標BPM・許容範囲を入力して検索し、出力フォルダ名を指定
-6. 必要に応じて「ファイル名・フォルダ名のオプション」を設定
-7. 初回は「ドライラン」にチェックを入れて「コピー実行」を押し、ログでコピー予定を確認
-8. 問題なければドライランのチェックを外して「コピー実行」
+1. Choose `export.pdb (stable)` or `One Library (beta)` under "Source library"
+2. Set "Source USB" to the root folder of a rekordbox-exported USB (the folder containing `PIONEER`)
+3. Set "Output folder" to your destination (e.g. a separate USB for a CDJ-400)
+4. Click "Load library" — this shows the playlist list and track counts (BPM search mode also loads
+   the whole library at this point)
+5. In "Playlist mode", uncheck any playlists you don't want; in "BPM search mode", enter a target BPM
+   and tolerance, search, and set an output folder name
+6. Adjust the "File / folder naming options" as needed
+7. The first time, check "Dry run" and click "Start copy" to review the plan in the log
+8. If it looks right, uncheck "Dry run" and click "Start copy" again
 
-コピー元ファイルが見つからない曲はスキップされ、ログに理由が表示されます（他の曲の処理は続行されます）。
+Tracks whose source file can't be found are skipped and logged with a reason; the rest continue normally.
 
-## 制限事項
+## Limitations
 
-- 対応しているのは通常のプレイリスト（トラックが入っているプレイリスト）です。スマートプレイリストの条件は評価せず、
-  スマートプレイリストは書き出された時点の内容に依存します。
-- 履歴 (History) プレイリストは対象外です。
-- `rekordbox-pdb` / `pyrekordbox` 側のフォーマット解釈が実際のファイルと異なる場合、読み込みでエラーになることがあります。
-  その場合は `core.py` の `load_playlists_pdb` / `load_playlists_onelib` を、ライブラリの実際の API に合わせて調整してください。
-- One Library (ベータ) は `pyrekordbox` の未リリース開発版に依存しています。インストール後に API が変わっている場合は
-  `pip install -r requirements-onelib.txt` を再実行してください。
+- Only regular playlists (playlists containing tracks) are supported. Smart playlist conditions are
+  not re-evaluated — a smart playlist reflects whatever was in it at export time.
+  History playlists are not included.
+- If `rekordbox-pdb` / `pyrekordbox`'s interpretation of the format doesn't match your actual file,
+  loading may fail. In that case, adjust `load_playlists_pdb` / `load_playlists_onelib` in `core.py`
+  to match the library's actual API.
+- One Library (beta) depends on an unreleased `pyrekordbox` development build. If the API has changed
+  since, re-run `pip install -r requirements-onelib.txt` to update.
+
+## Building a standalone executable
+
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm --onefile --windowed --name RekordboxFlatExport \
+  --collect-all pykakasi --collect-all rekordbox_pdb \
+  --collect-all pyrekordbox --collect-all sqlcipher3 \
+  app.py
+```
+
+This repo also has a GitHub Actions workflow (`.github/workflows/build.yml`) that builds both a
+Windows `.exe` and a macOS `.app` (zipped) and attaches them to a GitHub Release whenever a `v*` tag
+is pushed (or via manual `workflow_dispatch`). The macOS build is unsigned/not notarized, so it will
+show a Gatekeeper warning on first launch (right-click → Open to bypass).
